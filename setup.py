@@ -1,14 +1,14 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='cherty',
+    name='py_cherty',
     version='0.1.0',
     description='A package to send messages to an Electron app',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
     author='Your Name',
     author_email='your.email@example.com',
-    url='https://github.com/yourusername/cherty',
+    url='https://github.com/devonian-ai/py_cherty',
     packages=find_packages(),
     classifiers=[
         'Programming Language :: Python :: 3',

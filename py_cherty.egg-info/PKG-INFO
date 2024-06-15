@@ -1,0 +1,23 @@
+Metadata-Version: 2.1
+Name: py-cherty
+Version: 0.1.2
+Summary: A package to send messages to an Electron app
+Home-page: https://github.com/devonian-ai/py_cherty
+Author: Your Name
+Author-email: your.email@example.com
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.6
+Description-Content-Type: text/markdown
+License-File: LICENSE
+
+# py_cherty
+Python SDK for checkpointing data 
+
+py_cherty is a Python package to send messages to an Electron app using socket communication.
+
+## Installation
+
+```bash
+pip install py_cherty

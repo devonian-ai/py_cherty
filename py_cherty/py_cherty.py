@@ -11,7 +11,12 @@ class Cherty:
         self.port = port
 
     def checkpoint(self, data, metadata, identifier):
-        data_type, local_path = self.evaluate_data(data)
+        # Convert dict to JSON string if data is a dictionary
+        if isinstance(data, dict):
+            data = json.dumps(data)
+            data_type = 'json'
+        else:
+            data_type, local_path = self.evaluate_data(data)
 
         # Convert data to base64 if it's binary
         if data_type == 'binary':
@@ -21,7 +26,7 @@ class Cherty:
             'data': data,
             'metadata': metadata,
             'identifier': identifier,
-            'localPath': local_path,
+            'localPath': local_path if 'local_path' in locals() else None,
             'dataType': data_type
         }
 
@@ -38,10 +43,13 @@ class Cherty:
 
     def evaluate_data(self, data):
         # Check if data is a path to a file
-        possible_path = os.path.abspath(data)
-        if os.path.isfile(possible_path):
-            mime_type, _ = mimetypes.guess_type(possible_path)
-            return (mime_type or 'binary', possible_path)
+        try:
+            possible_path = os.path.abspath(data)
+            if os.path.isfile(possible_path):
+                mime_type, _ = mimetypes.guess_type(possible_path)
+                return (mime_type or 'binary', possible_path)
+        except Exception as e:
+            print(f"Error in evaluating file path: {e}")
 
         # Check if data is bytes
         if isinstance(data, bytes):
@@ -59,13 +67,26 @@ class Cherty:
 
                 # Check if it's a CSV by trying to parse the first few lines
                 try:
-                    csv.Sniffer().sniff(data)
-                    return ('csv', None)
+                    # A CSV should have multiple rows and columns, so we do a more thorough check
+                    dialect = csv.Sniffer().sniff(data)
+                    # Split the data into lines and check if it has multiple lines with the delimiter
+                    lines = data.splitlines()
+                    if len(lines) > 1 and all(dialect.delimiter in line for line in lines):
+                        return ('csv', None)
                 except csv.Error:
                     pass
                 
-                return ('text', None)
+                # Default to plain text
+                return ('text/plain', None)
         except Exception as e:
             print(f"Error in evaluating data type: {e}")
         
         return ('unknown', None)
+
+# Example usage
+if __name__ == "__main__":
+    cherty = Cherty()
+    cherty.checkpoint("Hello, world!", {"type": "greeting"}, "#example_1")
+    cherty.checkpoint("name,age\nAlice,30\nBob,25", {"type": "csv_data"}, "#example_2")
+    cherty.checkpoint({"msg": "Hello from Python"}, {"type": "json_data"}, "#example_3")
+    cherty.checkpoint("Hello from Python", {"type": "text"}, "#trffl_6loqBNGg")

@@ -15,6 +15,16 @@ class Cherty:
         if isinstance(data, dict):
             data = json.dumps(data)
             data_type = 'json'
+        elif isinstance(data, xr.Dataset):
+            # If it's an xarray, convert the dataset to a binary representation in memory
+            with io.BytesIO() as buffer:
+                data.to_zarr(store=buffer)
+                buffer.seek(0)
+                binary_data = buffer.read()
+            # Encode the binary data in base64
+            data = base64.b64encode(binary_data).decode('utf-8')
+            data_type = 'application/x-zarr'
+            local_path = None
         else:
             data_type, local_path = self.evaluate_data(data)
 
@@ -83,10 +93,10 @@ class Cherty:
         
         return ('unknown', None)
 
-# Example usage
-if __name__ == "__main__":
-    cherty = Cherty()
-    cherty.checkpoint("Hello, world!", {"type": "greeting"}, "#example_1")
-    cherty.checkpoint("name,age\nAlice,30\nBob,25", {"type": "csv_data"}, "#example_2")
-    cherty.checkpoint({"msg": "Hello from Python"}, {"type": "json_data"}, "#example_3")
-    cherty.checkpoint("Hello from Python", {"type": "text"}, "#trffl_6loqBNGg")
+# # Example usage
+# if __name__ == "__main__":
+#     cherty = Cherty()
+#     cherty.checkpoint("Hello, world!", {"type": "greeting"}, "#example_1")
+#     cherty.checkpoint("name,age\nAlice,30\nBob,25", {"type": "csv_data"}, "#example_2")
+#     cherty.checkpoint({"msg": "Hello from Python"}, {"type": "json_data"}, "#example_3")
+#     cherty.checkpoint("Hello from Python", {"type": "text"}, "#trffl_6loqBNGg")

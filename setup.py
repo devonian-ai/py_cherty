@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='py_cherty',
-    version='0.4.0',
+    version='0.4.1',
     description='A package to send messages to an Electron app',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',

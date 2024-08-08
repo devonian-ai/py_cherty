@@ -1,6 +1,7 @@
 import socket
 import json
 import base64
+import io
 import os
 import mimetypes
 import csv
@@ -15,7 +16,8 @@ class Cherty:
         if isinstance(data, dict):
             data = json.dumps(data)
             data_type = 'json'
-        elif isinstance(data, xr.Dataset):
+            local_path = None
+        elif hasattr(data, 'to_zarr'):
             # If it's an xarray, convert the dataset to a binary representation in memory
             with io.BytesIO() as buffer:
                 data.to_zarr(store=buffer)

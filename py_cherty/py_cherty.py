@@ -5,6 +5,8 @@ import io
 import os
 import mimetypes
 import csv
+import zarr
+import tempfile
 
 class Cherty:
     def __init__(self, host='127.0.0.1', port=1337):
@@ -18,11 +20,16 @@ class Cherty:
             data_type = 'json'
             local_path = None
         elif hasattr(data, 'to_zarr'):
-            # If it's an xarray, convert the dataset to a binary representation in memory
-            with io.BytesIO() as buffer:
-                data.to_zarr(store=buffer)
-                buffer.seek(0)
-                binary_data = buffer.read()
+            # Create a named temporary file to store the ZipStore
+            with tempfile.NamedTemporaryFile() as temp_file:
+                store = zarr.ZipStore(temp_file.name, mode='w')  # Use ZipStore with the temporary file
+                data.to_zarr(store=store)
+                store.close()  # Ensure all data is written
+
+                # Read the content of the temporary file into a buffer
+                temp_file.seek(0)
+                binary_data = temp_file.read()
+
             # Encode the binary data in base64
             data = base64.b64encode(binary_data).decode('utf-8')
             data_type = 'application/x-zarr'

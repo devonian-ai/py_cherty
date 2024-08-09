@@ -41,6 +41,7 @@ class Cherty:
         if data_type == 'binary':
             data = base64.b64encode(data).decode('utf-8')
         
+        # The data is base64 encoded, so it can be sent as ASCII
         message = {
             'data': data,
             'metadata': metadata,
@@ -49,7 +50,14 @@ class Cherty:
             'dataType': data_type
         }
 
-        self.send_message(message)
+        # Convert the message to a JSON string
+        message_str = json.dumps(message)
+
+        # Prefix with the length of the message
+        message_len = f"{len(message_str):<10}"  # Fixed-width length field
+
+        # Send the length-prefixed message
+        self.send_message(message_len + message_str)
 
     def send_message(self, message):
         message_json = json.dumps(message)

@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: py-cherty
-Version: 0.4.5
+Version: 0.4.7
 Summary: A package to send messages to an Electron app
 Home-page: https://github.com/devonian-ai/py_cherty
 Author: Alan Ransil

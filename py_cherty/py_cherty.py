@@ -5,49 +5,33 @@ import io
 import os
 import mimetypes
 import csv
-import zarr
 import tempfile
+import zarr
+import pandas as pd
+import hashlib
 
 class Cherty:
     def __init__(self, host='127.0.0.1', port=1337):
         self.host = host
         self.port = port
 
-    def checkpoint(self, data, metadata, identifier):
-        # Convert dict to JSON string if data is a dictionary
-        if isinstance(data, dict):
-            data = json.dumps(data)
-            data_type = 'json'
-            local_path = None
-        elif hasattr(data, 'to_zarr'):
-            # Create a named temporary file to store the ZipStore
-            with tempfile.NamedTemporaryFile() as temp_file:
-                store = zarr.ZipStore(temp_file.name, mode='w')  # Use ZipStore with the temporary file
-                data.to_zarr(store=store)
-                store.close()  # Ensure all data is written
+    # extension is optional; required to correctly interpret binary data
+    def checkpoint(self, data, metadata, identifier, extension=None):
 
-                # Read the content of the temporary file into a buffer
-                temp_file.seek(0)
-                binary_data = temp_file.read()
-
-            # Encode the binary data in base64
-            data = base64.b64encode(binary_data).decode('utf-8')
-            data_type = 'application/x-zarr'
-            local_path = None
-        else:
-            data_type, local_path = self.evaluate_data(data)
-
-        # Convert data to base64 if it's binary
-        if data_type == 'binary':
-            data = base64.b64encode(data).decode('utf-8')
+        # Figure out what type of data is being sent
+        # local_is_temp is a flag to indicate if the file is temporary and should be deleted after sending
+        data, data_type, local_path, local_is_temp = self.evaluate_data(data, extension)
         
-        # The data is base64 encoded, so it can be sent as ASCII
+        # The data is either (1) base64 encoded, so it can be sent as a string
+        # or (2) a path to a file, so it can also be sent as a string
         message = {
             'data': data,
             'metadata': metadata,
             'identifier': identifier,
             'localPath': local_path if 'local_path' in locals() else None,
-            'dataType': data_type
+            'localIsTemp': local_is_temp,
+            'dataType': data_type,
+            'extension': extension
         }
 
         # Convert the message to a JSON string
@@ -68,27 +52,49 @@ class Cherty:
         finally:
             client_socket.close()
 
-    def evaluate_data(self, data):
-        # Check if data is a path to a file
+    def evaluate_data(self, data, extension):
+
+        # Check if data is a path to a file. In this case, transmit the path over IPC
         try:
             possible_path = os.path.abspath(data)
             if os.path.isfile(possible_path):
                 mime_type, _ = mimetypes.guess_type(possible_path)
-                return (mime_type or 'binary', possible_path)
+                return (data, mime_type or 'binary', possible_path, False)
         except Exception as e:
-            print(f"Error in evaluating file path: {e}")
+            # print(f"Error in evaluating data as file path: {e}")
+            pass
 
+        # Convert dict to JSON string if data is a dictionary
+        # Send directly if below 100 MB, otherwise send as a temp file
+        if isinstance(data, dict):
+            data = json.dumps(data)
+            data_type = 'application/json'
+            size_in_bytes = len(data.encode('utf-8'))
+            data, local_path, is_temp = self.size_switch(size_in_bytes, data, '.json')
+            return (data, data_type, local_path, is_temp)
+        
+        # For xarray datasets, save as temporary Zarr file
+        elif hasattr(data, 'to_zarr'):
+            data, data_type, local_path, is_temp = self.store_as_netcdf(data)
+            return (data, data_type, local_path, is_temp)
+        
         # Check if data is bytes
-        if isinstance(data, bytes):
-            return ('binary', None)
-
+        elif isinstance(data, bytes):
+            data_type = 'application/octet-stream'
+            size_in_bytes = len(data)
+            data, local_path, is_temp = self.size_switch(size_in_bytes, data, '.bin')
+            return (data, data_type, local_path, is_temp)
+        # If it's a pandas df, convert to a csv string
+        elif isinstance(data, pd.DataFrame):
+            data = data.to_csv(index=False)
+        
         # Check if data is a string and try to identify the type
         try:
             if isinstance(data, str):
                 # Check if it's a valid JSON
                 try:
-                    json.loads(data)
-                    return ('json', None)
+                    parsed_data = json.loads(data)
+                    return self.evaluate_data(parsed_data, '.json')
                 except json.JSONDecodeError:
                     pass
 
@@ -99,21 +105,79 @@ class Cherty:
                     # Split the data into lines and check if it has multiple lines with the delimiter
                     lines = data.splitlines()
                     if len(lines) > 1 and all(dialect.delimiter in line for line in lines):
-                        return ('csv', None)
+                        size_in_bytes = len(data)
+                        data_type = 'text/csv'
+                        data, local_path, is_temp = self.size_switch(size_in_bytes, data, '.csv')
+                        return (data, data_type, local_path, is_temp)
                 except csv.Error:
                     pass
                 
                 # Default to plain text
-                return ('text/plain', None)
+                size_in_bytes = len(data)
+                data, local_path, is_temp = self.size_switch(size_in_bytes, data, '.txt')
+                data_type = 'text/plain'
+                return (data, data_type, local_path, is_temp)
         except Exception as e:
             print(f"Error in evaluating data type: {e}")
         
-        return ('unknown', None)
+        try:
+            data_as_bytes = bytes(data, 'utf-8')
+            return self.evaluate_data(data_as_bytes, extension)
+        except:
+            pass
+        return (data, None, None, None)
 
-# # Example usage
-# if __name__ == "__main__":
-#     cherty = Cherty()
-#     cherty.checkpoint("Hello, world!", {"type": "greeting"}, "#example_1")
-#     cherty.checkpoint("name,age\nAlice,30\nBob,25", {"type": "csv_data"}, "#example_2")
-#     cherty.checkpoint({"msg": "Hello from Python"}, {"type": "json_data"}, "#example_3")
-#     cherty.checkpoint("Hello from Python", {"type": "text"}, "#trffl_6loqBNGg")
+    def size_switch (self, size_in_bytes, data, extension):
+        if size_in_bytes < 75 * 1024 * 1024:  # 75 MB
+            if isinstance(data, (bytes, bytearray)):
+                data = base64.b64encode(data).decode('utf-8') # Convert to base64 so it can be sent as ASCII
+            local_path = None
+            is_temp = False
+        else:
+            local_path = self.save_temp_data(data, extension)
+            data = None
+            is_temp = True
+        return (data, local_path, is_temp)
+
+    def save_temp_data(self, data, extension):
+
+        # Create a temporary file that won't be deleted automatically
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=extension)
+        try:
+            if not isinstance(data, (bytes, bytearray)):
+                data = data.encode('utf-8') 
+            temp_file.write(data)
+            temp_file_path = temp_file.name  # Get the path to the file
+            # print(f"Temporary file created at: {temp_file_path}")
+        finally:
+            temp_file.close()  # Close the file, but it won't be deleted
+
+        return temp_file_path
+
+
+    def store_as_netcdf(self, data):
+        # Create a named temporary file with .nc extension and ensure it is not deleted automatically
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.nc')
+        
+        try:
+            # Save the xarray Dataset to NetCDF format
+            data.to_netcdf(temp_file.name)
+
+            # Calculate the hash of the file
+            with open(temp_file.name, 'rb') as f:
+                file_data = f.read()
+                data_hash = hashlib.sha256(file_data).hexdigest()
+            # print(f"Data SHA-256 Hash: {data_hash}")
+
+            # Save the path of the temporary file
+            temp_file_path = temp_file.name
+            # print(f"Temporary file created at: {temp_file_path}")
+        finally:
+            temp_file.close()  # Close the file, but it won't be deleted
+
+        # Return metadata for further use
+        data = None
+        data_type = 'application/x-netcdf'
+        local_path = temp_file_path
+        is_temp = True
+        return (data, data_type, local_path, is_temp)
